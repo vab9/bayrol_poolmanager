@@ -1,0 +1,89 @@
+import logging
+import requests
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import CONF_HOST
+
+from .const import DOMAIN
+from .const import PUMP_MODES
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class PoolPumpSwitch(SwitchEntity):
+    """Representation of the pool pump switch."""
+
+    def __init__(self, host):
+        """Initialize the pool pump switch."""
+        self._host = host
+        self._state = "off"  # Default state
+        self._available = True
+
+    @property
+    def name(self):
+        """Return the name of the switch."""
+        return "Pool Pump"
+
+    @property
+    def is_on(self):
+        """Return true if the pump is on."""
+        return self._state != "off"
+
+    def turn_on(self, **kwargs):
+        """Turn the pump on in 'normal' mode by default."""
+        self.set_mode("normal")
+
+    def turn_off(self, **kwargs):
+        """Turn the pump off."""
+        self.set_mode("off")
+
+    def set_mode(self, mode):
+        """Set the mode of the pump."""
+        if mode not in PUMP_MODES:
+            _LOGGER.error(f"Invalid mode: {mode}")
+            return
+
+        payload = {
+            "get": ["60.5427.value", "1.1256.value", "1.1246.value"],
+            "set": {"60.5427.value": str(PUMP_MODES[mode])},
+        }
+
+        try:
+            response = requests.post(f"http://{self._host}/set_mode", json=payload)
+            if response.status_code == 200:
+                self._state = mode
+                _LOGGER.info(f"Pump mode set to {mode} successfully.")
+            else:
+                _LOGGER.error(
+                    f"Failed to set pump mode. Status code: {response.status_code}"
+                )
+        except requests.RequestException as e:
+            _LOGGER.error(f"Error setting pump mode: {e}")
+            self._available = False
+
+    def update(self):
+        """Fetch the current state of the pump (optional, if there's an endpoint for this)."""
+        try:
+            response = requests.get(f"http://{self._host}/status")
+            if response.status_code == 200:
+                # Assume the status returns JSON with the current mode
+                self._state = response.json().get("mode", "off")
+                self._available = True
+            else:
+                _LOGGER.error(
+                    f"Failed to update pump state. Status code: {response.status_code}"
+                )
+                self._available = False
+        except requests.RequestException as e:
+            _LOGGER.error(f"Error fetching pump state: {e}")
+            self._available = False
+
+    @property
+    def available(self):
+        """Return True if the entity is available."""
+        return self._available
+
+
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the pool pump switch."""
+    host = hass.data[DOMAIN]["host"]
+    add_entities([PoolPumpSwitch(host)], True)
