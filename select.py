@@ -31,7 +31,7 @@ class PoolPumpModeSelect(SelectEntity):
     @property
     def name(self) -> str:
         """Return the name of the select entity."""
-        return f"{self._name} Mode"
+        return f"{self._name}"
 
     @property
     def device_info(self) -> DeviceInfo:
