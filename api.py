@@ -4,6 +4,7 @@ import logging
 import re
 
 import httpx
+
 from .const import PumpData, PumpMode
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,11 +28,11 @@ class PoolPumpAPI:
         try:
             auth_response = await self._session.get(self._base_url)
             _LOGGER.debug("Auth response received")
+            sid = re.search(r"wui\.init\('([A-Za-z0-9]+)'", auth_response.text).group(1)
+        # TODO several exceptions possible here
         except Exception as e:
             _LOGGER.error("Failed to get auth response: %s", e)
             return False
-
-        sid = re.search(r"wui\.init\('([A-Za-z0-9]+)'", auth_response.text).group(1)
 
         if not sid:
             _LOGGER.error("Failed to retrieve session ID from auth response")
@@ -97,6 +98,11 @@ class PoolPumpAPI:
         if title == "PM5":
             _LOGGER.debug("The session is not authenticated")
             return False
+        # TODO remove custom title recognition or use other detection mechanism
+        if "Can Fig" in title:
+            _LOGGER.debug("The session is not authenticated")
+            return False
+
         _LOGGER.error("Unexpected response to menu request. Not authenticated")
         return False
 

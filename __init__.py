@@ -14,6 +14,7 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigValidationError
 from homeassistant.helpers import discovery
 
 from .api import PoolPumpAPI
@@ -40,16 +41,13 @@ type PoolPumpConfigEntry = ConfigEntry[PoolPumpAPI]  # noqa: F821
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up Bayrol Poolmanager from configuration.yaml."""
-    _LOGGER.debug("async_setup called")
-
     if DOMAIN not in config:
-        _LOGGER.warning("Domain not found in the configuration")
-        return True
+        _LOGGER.warning("DOMAIN %s not found in the YAML configuration", DOMAIN)
+        return False
 
-    _LOGGER.debug("Retrieving configuration data")
     devices_config = config[DOMAIN].get("devices", [])
     if not devices_config:
-        _LOGGER.error("No pool pumps found in configuration")
+        _LOGGER.error("No pool pumps found in configuration.yaml")
         return False
 
     # Store each device (pump) in hass.data
@@ -66,8 +64,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         )  # No built-in constant for 'pump'
 
         if not host or not username or not password:
-            _LOGGER.error("Missing configuration for pump: %s", name)
-            continue
+            raise ConfigValidationError(f"Missing configuration data for pump {name}")
 
         _LOGGER.debug("Setting up device with Name: %s, Host: %s", name, host)
 
@@ -75,48 +72,28 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         api = await hass.async_add_executor_job(
             lambda: PoolPumpAPI(host, username, password)
         )
-        _LOGGER.debug("API instance created")
+        _LOGGER.debug("New API instance created")
 
-        # Authenticate during setup
-
-        # TODO
-        # if not await api.authenticated():
-        if True:
-            _LOGGER.debug("During setup, api is still unauthenticated")
-
-            if not await api.login():
-                _LOGGER.error(
-                    "Authentication with the pool pump %s at %s failed during setup",
-                    name,
-                    host,
-                )
-                continue
-            else:
-                _LOGGER.debug("Authenticated successfully for device: %s", name)
-
-        # Store the API instance and related device info in hass.data
-        hass.data[DOMAIN]["devices"].append(
-            {
-                "api": api,
-                CONF_NAME: name,
-                CONF_HOST: host,
-                CONF_USERNAME: username,
-                CONF_PASSWORD: password,
-                "type": device_type,  # No built-in constant for custom types
-            }
-        )
+        discovery_info = {
+            "api": api,
+            CONF_NAME: name,
+            CONF_HOST: host,
+            CONF_USERNAME: username,
+            CONF_PASSWORD: password,
+            "type": device_type,  # No built-in constant for custom types
+        }
 
         # Set up platforms (e.g., sensor) for this pump
         for platform in PLATFORMS:
             hass.async_create_task(
                 discovery.async_load_platform(
-                    hass, platform, DOMAIN, {CONF_NAME: name}, config
+                    hass,
+                    platform,
+                    DOMAIN,
+                    discovery_info,
+                    config,
                 )
             )
-
-    if not hass.data[DOMAIN]["devices"]:
-        _LOGGER.error("No valid pool pumps were set up")
-        return False
 
     _LOGGER.debug("Platforms set up successfully for all devices")
 

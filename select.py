@@ -3,7 +3,9 @@
 import logging
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
@@ -95,14 +97,18 @@ async def async_setup_platform(
     if discovery_info is None:
         return
 
-    devices = hass.data[DOMAIN].get("devices", [])
-    selects = []
+    api = discovery_info.get("api")
+    name = discovery_info.get(CONF_NAME)
+    host = discovery_info.get(CONF_HOST)
 
-    for device in devices:
-        api = device["api"]
-        name = device["name"]
+    # Authenticate during setup of select entity
+    if not await api.authenticated():
+        _LOGGER.debug("During setup, api is still unauthenticated")
+        _LOGGER.debug("Logging in")
 
-        if device["type"] == "pump":
-            selects.append(PoolPumpModeSelect(api, name))
+        if not await api.login():
+            raise PlatformNotReady(f"Could not login to pool pump at: {host}")
+        else:
+            _LOGGER.debug("Authenticated successfully for device: %s", name)
 
-    async_add_entities(selects, True)
+    async_add_entities([PoolPumpModeSelect(api, name)])

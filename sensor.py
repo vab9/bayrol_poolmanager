@@ -3,7 +3,7 @@
 import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import CONF_NAME, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -77,17 +77,8 @@ async def async_setup_platform(
     """Set up the pool pump temperature sensor."""
     if discovery_info is None:
         return
-    devices = hass.data[DOMAIN].get("devices", [])
-    sensors = []
 
-    for device in devices:
-        api = device["api"]
-        name = device["name"]
+    api = discovery_info.get("api")
+    name = discovery_info.get(CONF_NAME)
 
-        if device["type"] == "pump":
-            sensors.append(TemperatureSensor(api, name))
-
-    # api = hass.data[DOMAIN]["api"]
-    # entry_data = hass.data[DOMAIN][config.entry_id]
-    # api = entry_data["api"]
-    async_add_entities(sensors, True)
+    async_add_entities([TemperatureSensor(api, name)])
