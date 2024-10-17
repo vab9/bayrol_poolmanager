@@ -203,24 +203,19 @@ class PoolPumpAPI:
             self._current_data[PumpData.PUMP_MODE.value] = json_data.get("data").get(
                 PumpData.PUMP_MODE.value
             )
-            _LOGGER.warning(self._current_data)
+            _LOGGER.debug(self._current_data)
             return json_data.get("data").get(PumpData.PUMP_MODE.value) == mode.value
 
     async def get_filter_pump_data(self, data):
         """Retrieve various data from the filter pump."""
-        _LOGGER.warning(data)
-        _LOGGER.warning("-------------")
+        _LOGGER.debug("Requested data: %s", data)
 
         if not isinstance(data, list):
             raise TypeError("data must be a list")
 
-        if not all(d.name in PumpData.__members__ for d in data):
-            raise TypeError("data must contain valid PumpData enum members")
-
-        # TODO Why does this not work?
-        # if not all(d in PumpData for d in data):
-        #     # if not all(isinstance(d, Enum) for d in data):
-        #     raise TypeError("data must contain PumpData enum")
+        if not all(d in PumpData for d in data):
+            _LOGGER.error("Validation error")
+            raise TypeError("data must contain PumpData enum")
 
         json_payload = {"get": [d.value for d in data]}
         _LOGGER.debug("JSON Payload: %s", json_payload)

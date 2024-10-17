@@ -88,5 +88,5 @@ async def async_setup_platform(
 
     async_add_entities(
         [TemperatureSensor(api, name)],
-        # update_before_add=True,
+        update_before_add=True,
     )
