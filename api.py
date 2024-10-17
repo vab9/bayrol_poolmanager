@@ -20,6 +20,7 @@ class PoolPumpAPI:
         self._username = username
         self._password = password
         self._session = httpx.AsyncClient()
+        self._current_data = {}
 
     async def get_session_id(self):
         """Retrieve a new session id from the login page."""
@@ -166,23 +167,13 @@ class PoolPumpAPI:
             _LOGGER.error("Failed to elevate service level: %s", e)
             return False
 
-    async def set_filter_pump_mode(self, mode: str):
+    async def set_filter_pump_mode(self, mode: PumpMode):
         """Set the pump mode."""
-        try:
-            mode_enum = PumpMode[mode.upper()]  # Convert string to PumpMode
-        except KeyError:
-            _LOGGER.error("Invalid mode: %s", mode)
-            return False
-
-        _LOGGER.debug("BEFORE: %s", self._session.params.get("sid"))
-
         # (re-)authorize session if necessary
         if not await self.authenticated():
             if not await self.login():
-                _LOGGER.warning("Could not set filter pump mode")
+                _LOGGER.warning("Could not login to set filter pump mode")
                 return False
-
-        _LOGGER.debug("AFTER: %s", self._session.params.get("sid"))
 
         # Elevate service level to 2
         if not await self.elevate_service_level(2):
@@ -191,44 +182,64 @@ class PoolPumpAPI:
         try:
             pump_payload = {
                 "get": ["60.5427.value", "1.1256.value", "1.1246.value"],
-                "set": {"60.5427.value": mode_enum.value},
+                "set": {"60.5427.value": mode.value},
             }
             _LOGGER.debug(pump_payload)
             response = await self._session.post(self._base_url, json=pump_payload)
-            _LOGGER.debug(response.request.url)
-            _LOGGER.debug(response.request.headers)
+            json_data = response.json()
+            # _LOGGER.debug(response.request.url)
+            # _LOGGER.debug(response.request.headers)
             # _LOGGER.debug(response.request.content)
-            _LOGGER.debug(response.json())
+            _LOGGER.debug(json_data)
 
         except Exception as e:
             _LOGGER.error("Error setting pump mode: %s", e)
             return False
         else:
-            return response.json()["status"]["code"] == 0
+            _LOGGER.debug("json response from setting mode: ")
+            _LOGGER.debug(json_data)
+            _LOGGER.debug(self._current_data)
+
+            self._current_data[PumpData.PUMP_MODE.value] = json_data.get("data").get(
+                PumpData.PUMP_MODE.value
+            )
+            _LOGGER.warning(self._current_data)
+            return json_data.get("data").get(PumpData.PUMP_MODE.value) == mode.value
 
     async def get_filter_pump_data(self, data):
         """Retrieve various data from the filter pump."""
-        if not isinstance(data, list):
-            raise TypeError("data must be a list of PumpData")
-        if not all(isinstance(d, PumpData) for d in data):
-            raise TypeError("data must contain instances of PumpData")
+        _LOGGER.warning(data)
+        _LOGGER.warning("-------------")
 
-        data_values = [d.value for d in data]
-        _LOGGER.debug("Data values: %s", data_values)
+        if not isinstance(data, list):
+            raise TypeError("data must be a list")
+
+        if not all(d.name in PumpData.__members__ for d in data):
+            raise TypeError("data must contain valid PumpData enum members")
+
+        # TODO Why does this not work?
+        # if not all(d in PumpData for d in data):
+        #     # if not all(isinstance(d, Enum) for d in data):
+        #     raise TypeError("data must contain PumpData enum")
+
+        json_payload = {"get": [d.value for d in data]}
+        _LOGGER.debug("JSON Payload: %s", json_payload)
 
         try:
             response = await self._session.post(
                 self._base_url,
-                json={"get": data_values},
+                json=json_payload,
             )
-            result = response.json()["data"]
-            _LOGGER.debug("Received response data for the filter pump: %s", result)
+            # Update current data
+            self._current_data.update(response.json().get("data"))
 
         except Exception as e:
             _LOGGER.warning("Error getting pump data: %s", e)
-            return None
+            raise
         else:
-            return result
+            _LOGGER.debug("Get filter pump function is returning data: ")
+            _LOGGER.debug({key: self._current_data[key.value] for key in data})
+            return {key: self._current_data[key.value] for key in data}
 
     async def available(self):
         """Return True if the filter pump is reachable, False otherwise."""

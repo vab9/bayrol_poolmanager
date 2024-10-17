@@ -3,40 +3,38 @@
 import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import CONF_NAME, UnitOfTemperature
+from homeassistant.const import CONF_HOST, CONF_NAME, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-# from . import HubConfigEntry
 from .api import PoolPumpAPI
-from .const import DOMAIN, PumpData, PumpMode
+from .const import DOMAIN, PumpData
 
 _LOGGER = logging.getLogger(__name__)
 
-# ////////
 
+class TemperatureSensor(SensorEntity):
+    """Representation of the pool pump temperature sensor."""
 
-class PoolPumpSensorBase(SensorEntity):
-    """Base class for the pool pump sensors."""
+    device_class = SensorDeviceClass.TEMPERATURE
+    _attr_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = "measurement"
 
-    def __init__(self, api: PoolPumpAPI, name: str, unique_id_suffix: str) -> None:
-        """Initialize the pool pump sensor."""
-        self._api = api
+    def __init__(self, api: PoolPumpAPI, name: str) -> None:
+        """Initialize the temperature sensor."""
         self._name = name
-        self._attr_unique_id = f"{self._api._host}_{unique_id_suffix}"
+        self._api = api
+        self._temperature = None
+        self._attr_unique_id = f"{api._host}_{name}_temp"
         self._attr_available = False
 
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
         return self._name
-
-    @property
-    def available(self) -> bool:
-        """Return true if the sensor is available."""
-        return self._attr_available
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -48,33 +46,6 @@ class PoolPumpSensorBase(SensorEntity):
             model="Poolmanager",
         )
 
-    async def fetch_data(self, data: PumpData):
-        """Fetch the data from the pool pump."""
-        try:
-            status = await self._api.get_filter_pump_data([data])
-            self._attr_available = status is not None
-        except Exception as e:
-            _LOGGER.error("Failed to update data for %s: %s", self._name, e)
-            self._attr_available = False
-            return None
-        else:
-            msg = f"Updating {data.name} to {status.get(data.value)}"
-            _LOGGER.debug(msg)
-            return status
-
-
-class TemperatureSensor(PoolPumpSensorBase):
-    """Representation of the pool pump temperature sensor."""
-
-    device_class = SensorDeviceClass.TEMPERATURE
-    _attr_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_state_class = "measurement"
-
-    def __init__(self, api: PoolPumpAPI, name: str) -> None:
-        """Initialize the temperature sensor."""
-        super().__init__(api, name, "tempsensor")
-        self._temperature = None
-
     @property
     def state(self) -> float | None:
         """Return the temperature of the pool."""
@@ -82,37 +53,14 @@ class TemperatureSensor(PoolPumpSensorBase):
 
     async def async_update(self) -> None:
         """Fetch the current temperature from the pump."""
-        result = await self.fetch_data(PumpData.TEMPERATURE)
+        try:
+            result = await self._api.get_filter_pump_data([PumpData.TEMPERATURE])
+        except Exception as e:
+            self._attr_available = False
         if result:
-            self._temperature = result.get(PumpData.TEMPERATURE.value)
-
-
-class PumpModeSensor(PoolPumpSensorBase):
-    """Representation of the pool pump mode sensor."""
-
-    device_class = SensorDeviceClass.ENUM
-
-    def __init__(self, api: PoolPumpAPI, name: str) -> None:
-        """Initialize the pump mode sensor."""
-        super().__init__(api, name, "pumpmodesensor")
-        self._mode: PumpMode = None
-
-    @property
-    def state(self) -> PumpMode | None:
-        """Return the mode of the pool pump."""
-        return self._mode if self.available else None
-
-    @property
-    def options(self):
-        """Return the list of possible pump modes."""
-        return [mode.name for mode in PumpMode]
-
-    async def async_update(self) -> None:
-        """Fetch the current mode from the pump."""
-        result = await self.fetch_data(PumpData.CURRENT_PUMP_MODE)
-        if result:
-            mode_number = int(result.get(PumpData.CURRENT_PUMP_MODE.value))
-            self._mode = PumpMode(mode_number)
+            self._attr_available = True
+            _LOGGER.debug(result)
+            self._temperature = result.get(PumpData.TEMPERATURE)
 
 
 async def async_setup_platform(
@@ -127,5 +75,18 @@ async def async_setup_platform(
 
     api = discovery_info.get("api")
     name = discovery_info.get(CONF_NAME)
+    host = discovery_info.get(CONF_HOST)
 
-    async_add_entities([TemperatureSensor(api, name), PumpModeSensor(api, name)])
+    # Authenticate during setup of select entity
+    if not await api.authenticated():
+        _LOGGER.debug("During setup, api is still unauthenticated")
+        _LOGGER.debug("Logging in")
+
+        if not await api.login():
+            raise PlatformNotReady(f"Could not login to pool pump at: {host}")
+        _LOGGER.debug("Authenticated successfully for device: %s", name)
+
+    async_add_entities(
+        [TemperatureSensor(api, name)],
+        # update_before_add=True,
+    )
